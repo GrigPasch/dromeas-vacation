@@ -1,0 +1,60 @@
+{
+  "name": "vacation-management-system",
+  "version": "0.1.0",
+  "private": true,
+  "dependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.0",
+    "@testing-library/user-event": "^14.6.1",
+    "date-fns": "^4.1.0",
+    "lucide-react": "^0.556.0",
+    "mysql2": "^3.15.3",
+    "process": "^0.11.10",
+    "react": "^19.2.1",
+    "react-datepicker": "^9.1.0",
+    "react-dom": "^19.2.1",
+    "react-scripts": "^5.0.1",
+    "web-vitals": "^5.1.0"
+  },
+  "scripts": {
+    "start": "react-scripts start",
+    "build": "react-scripts build",
+    "test": "react-scripts test",
+    "eject": "react-scripts eject"
+  },
+  "eslintConfig": {
+    "extends": [
+      "react-app",
+      "react-app/jest"
+    ]
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  },
+  "cSpell.language": "en,el",
+  "cSpell.enabledLanguageIds": [
+    "plaintext",
+    "markdown",
+    "typescript",
+    "javascript",
+    "html"
+  ],
+  "cSpell.dictionaries": [
+    "el",
+    "en"
+  ],
+  "devDependencies": {
+    "autoprefixer": "^10.4.23",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^3.4.19"
+  }
+}
