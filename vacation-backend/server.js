@@ -1,7 +1,8 @@
-/* eslint-disable no-lone-blocks */
 const express = require('express');
 const mysql = require('mysql2/promise');
 const cors = require('cors');
+const jwt = require('jsonwebtoken');
+const bcrypt = require('bcrypt');
 require('dotenv').config();
 const emailService = require('./emailService');
 
@@ -50,6 +51,25 @@ const initializeDatabase = async () => {
   }
 };
 
+const JWT_SECRET = process.env.JWT_SECRET;
+
+const authenticateToken = (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1]; // Bearer <token>
+
+  if (!token) {
+    return res.status(401).json({ success: false, error: 'Απαιτείται σύνδεση' });
+  }
+
+  jwt.verify(token, JWT_SECRET, (err, user) => {
+    if (err) {
+      return res.status(401).json({ success: false, error: 'Μη έγκυρο ή ληγμένο token' });
+    }
+    req.user = user;
+    next();
+  });
+};
+
 app.get('/api/health', (req, res) => {
   res.json({ 
     status: 'ok', 
@@ -90,30 +110,33 @@ app.post('/api/auth/login', async (req, res) => {
         error: 'Λείπουν στοιχεία σύνδεσης'
       });
     }
-    {/* Fetch user with all existing joins */}
+    
+    // Fetch user by username only — password check done via bcrypt below
     const [rows] = await db.execute(`
       SELECT u.*, d.name as department_name, d.color as department_color
       FROM users u
       JOIN departments d ON u.department_id = d.id
-      WHERE u.username = ? AND u.password = ?
-    `, [username, password]);
-    
-    if (rows.length > 0) {
+      WHERE u.username = ?
+    `, [username]);
+
+    // Verify password using bcrypt
+    const passwordMatch = rows.length > 0
+      ? await bcrypt.compare(password, rows[0].password)
+      : false;
+
+    if (rows.length > 0 && passwordMatch) {
       const user = rows[0];
 
-      {/* April 1st refresh logic */}
+      // April 1st refresh logic
       const now = new Date();
       const currentYear = now.getFullYear();
-      {/* If date < April 1st -> year is previous else year is current year */}
       const cycleStartYear = now.getMonth() < 3 ? currentYear - 1 : currentYear;
 
-      {/* Check the current cycle balance */}
       const [existingBalance] = await db.execute(
         'SELECT * FROM user_annual_balances WHERE user_id = ? AND cycle_start_year = ?',
         [user.id, cycleStartYear]
       );
 
-      {/* If no cycle balance, initialize and refresh */}
       if (existingBalance.length === 0) {
         await db.execute(
           'INSERT INTO user_annual_balances (user_id, cycle_start_year, total_allowed) VALUES (?, ?, ?)',
@@ -121,22 +144,27 @@ app.post('/api/auth/login', async (req, res) => {
         );
       }
 
-      {/* Fetch all balances for a user */}
       const [annualBalances] = await db.execute(
         'SELECT cycle_start_year, total_allowed, carried_over FROM user_annual_balances WHERE user_id = ? ORDER BY cycle_start_year DESC',
         [user.id]
       );
-      {/* END REFRESH LOGIC */}
 
-      {/* Return the full user object PLUS the annual balances */}
+      // Generate JWT token — expires in 8 hours
+      const token = jwt.sign(
+        { id: user.id, username: user.username, role: user.role },
+        JWT_SECRET,
+        { expiresIn: '8h' }
+      );
+
       res.json({
         success: true,
+        token,
         user: {
           id: user.id,
           username: user.username,
           name: user.name,
           email: user.email,
-          totalDays: user.total_days, 
+          totalDays: user.total_days,
           sickDaysTotal: user.sick_days_total || 10,
           maternityDaysTotal: user.maternity_days_total,
           paternityDaysTotal: user.paternity_days_total,
@@ -148,7 +176,7 @@ app.post('/api/auth/login', async (req, res) => {
           managerLevel: user.manager_level, 
           gender: user.gender,
         },
-        annualBalances: annualBalances 
+        annualBalances
       });
     } else {
       res.json({
@@ -165,7 +193,7 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
-app.get('/api/departments', async (req, res) => {
+app.get('/api/departments', authenticateToken, async (req, res) => {
   try {
     const [rows] = await db.execute('SELECT * FROM departments ORDER BY name');
     res.json(rows);
@@ -175,7 +203,7 @@ app.get('/api/departments', async (req, res) => {
   }
 });
 
-app.get('/api/users', async (req, res) => {
+app.get('/api/users', authenticateToken, async (req, res) => {
   try {
     const [rows] = await db.execute(`
       SELECT u.*, d.name as department_name, d.color as department_color
@@ -190,7 +218,7 @@ app.get('/api/users', async (req, res) => {
   }
 });
 
-app.get('/api/vacation-requests', async (req, res) => {
+app.get('/api/vacation-requests', authenticateToken, async (req, res) => {
   try {
     const [rows] = await db.execute(`
       SELECT vr.*, 
@@ -223,7 +251,7 @@ app.get('/api/vacation-requests', async (req, res) => {
   }
 });
 
-app.get('/api/vacation-requests/upcoming/:userId', async (req, res) => {
+app.get('/api/vacation-requests/upcoming/:userId', authenticateToken, async (req, res) => {
   try {
     const { userId } = req.params;
     
@@ -242,7 +270,7 @@ app.get('/api/vacation-requests/upcoming/:userId', async (req, res) => {
   }
 });
 
-app.get('/api/annual-balances', async (req, res) => {
+app.get('/api/annual-balances', authenticateToken, async (req, res) => {
   const query = `
     SELECT 
       u.id as userId,
@@ -266,7 +294,7 @@ app.get('/api/annual-balances', async (req, res) => {
   }
 });
 
-app.post('/api/vacation-requests', async (req, res) => {
+app.post('/api/vacation-requests', authenticateToken, async (req, res) => {
   try {
     const { userId, startDate, endDate, reason, leaveType } = req.body;
     
@@ -277,8 +305,7 @@ app.post('/api/vacation-requests', async (req, res) => {
       });
     }
     
-    {/* Validate leave type */}
-    const validLeaveTypes = ['vacation', 'sick', 'maternity', 'paternity', 'unpaid'];
+    const validLeaveTypes = ['vacation', 'sick', 'maternity', 'paternity', 'unpaid', 'unjustified'];
     if (!validLeaveTypes.includes(leaveType)) {
       return res.status(400).json({
         success: false,
@@ -308,30 +335,17 @@ app.post('/api/vacation-requests', async (req, res) => {
     if (process.env.SMTP_USER && process.env.SMTP_PASSWORD) {
       if (user.email) {
         await emailService.sendRequestSubmittedEmail(
-          user.email,
-          user.name,
-          startDate,
-          endDate,
-          reason
+          user.email, user.name, startDate, endDate, reason
         );
       }
-      
       if (user.manager_email && user.manager_name) {
         await emailService.sendManagerNotificationEmail(
-          user.manager_email,
-          user.manager_name,
-          user.name,
-          startDate,
-          endDate,
-          reason
+          user.manager_email, user.manager_name, user.name, startDate, endDate, reason
         );
       }
     }
     
-    res.json({
-      success: true,
-      requestId: result.insertId
-    });
+    res.json({ success: true, requestId: result.insertId });
   } catch (error) {
     console.error('Create vacation request error:', error);
     res.status(500).json({
@@ -341,27 +355,19 @@ app.post('/api/vacation-requests', async (req, res) => {
   }
 });
 
-app.put('/api/vacation-requests/:id/status', async (req, res) => {
+app.put('/api/vacation-requests/:id/status', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
     const { status, reviewerId, managerLevel } = req.body;
 
     if (!status || !reviewerId) {
-      return res.status(400).json({
-        success: false,
-        error: 'Λείπουν απαραίτητα στοιχεία'
-      });
+      return res.status(400).json({ success: false, error: 'Λείπουν απαραίτητα στοιχεία' });
     }
 
-    {/* Only "approved" or "rejected" is sent from frontend */} 
     if (!['approved', 'rejected'].includes(status)) {
-      return res.status(400).json({
-        success: false,
-        error: 'Μη έγκυρη κατάσταση'
-      });
+      return res.status(400).json({ success: false, error: 'Μη έγκυρη κατάσταση' });
     }
 
-    {/* Load request */}
     const [requestRows] = await db.execute(`
       SELECT vr.*, u.email AS user_email, u.name AS user_name, u.manager_id
       FROM vacation_requests vr
@@ -370,34 +376,20 @@ app.put('/api/vacation-requests/:id/status', async (req, res) => {
     `, [id]);
 
     if (requestRows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        error: 'Αίτηση δεν βρέθηκε'
-      });
+      return res.status(404).json({ success: false, error: 'Αίτηση δεν βρέθηκε' });
     }
 
     const request = requestRows[0];
     const now = new Date();
 
-    {/* Fetch manager info */}
-    const [managerRows] = await db.execute(
-      'SELECT name FROM users WHERE id = ?',
-      [reviewerId]
-    );
-
+    const [managerRows] = await db.execute('SELECT name FROM users WHERE id = ?', [reviewerId]);
     const managerName = managerRows[0]?.name || 'Διαχειριστής';
     let currentManagerLevel = managerLevel || 1;
 
-    {/* Force manager ID 40 to always be Level 2 */}
     if (parseInt(reviewerId) === 40) {
       currentManagerLevel = 2;
     }
 
-    //
-    // ─────────────────────────────────────
-    //   MANAGER LEVEL 1
-    // ─────────────────────────────────────
-    //
     if (currentManagerLevel === 1) {
       if (status === 'approved') {
         await db.execute(`
@@ -412,22 +404,13 @@ app.put('/api/vacation-requests/:id/status', async (req, res) => {
 
         if (process.env.SMTP_USER && request.user_email) {
           await emailService.sendRequestApprovedEmail(
-            request.user_email,
-            request.user_name,
-            request.start_date,
-            request.end_date,
-            `${managerName} (Επίπεδο 1)`
+            request.user_email, request.user_name, request.start_date, request.end_date, `${managerName} (Επίπεδο 1)`
           );
         }
 
-        return res.json({
-          success: true,
-          message: 'Εγκρίθηκε από Manager 1 – σε αναμονή Manager 2',
-          newStatus: 'manager1_approved'
-        });
+        return res.json({ success: true, message: 'Εγκρίθηκε από Manager 1 – σε αναμονή Manager 2', newStatus: 'manager1_approved' });
 
-      } 
-      else {
+      } else {
         await db.execute(`
           UPDATE vacation_requests 
           SET manager1_id = ?,
@@ -442,27 +425,14 @@ app.put('/api/vacation-requests/:id/status', async (req, res) => {
 
         if (process.env.SMTP_USER && request.user_email) {
           await emailService.sendRequestRejectedEmail(
-            request.user_email,
-            request.user_name,
-            request.start_date,
-            request.end_date,
-            `${managerName} (Επίπεδο 1)`
+            request.user_email, request.user_name, request.start_date, request.end_date, `${managerName} (Επίπεδο 1)`
           );
         }
 
-        return res.json({
-          success: true,
-          message: 'Απορρίφθηκε από Manager 1',
-          newStatus: 'manager1_rejected'
-        });
+        return res.json({ success: true, message: 'Απορρίφθηκε από Manager 1', newStatus: 'manager1_rejected' });
       }
     }
 
-    //
-    // ─────────────────────────────────────
-    //   MANAGER LEVEL 2 (Final Decision)
-    // ─────────────────────────────────────
-    //
     if (currentManagerLevel === 2) {
       if (status === 'approved') {
         await db.execute(`
@@ -479,22 +449,13 @@ app.put('/api/vacation-requests/:id/status', async (req, res) => {
 
         if (process.env.SMTP_USER && request.user_email) {
           await emailService.sendRequestApprovedEmail(
-            request.user_email,
-            request.user_name,
-            request.start_date,
-            request.end_date,
-            `${managerName} (Τελική Έγκριση)`
+            request.user_email, request.user_name, request.start_date, request.end_date, `${managerName} (Τελική Έγκριση)`
           );
         }
 
-        return res.json({
-          success: true,
-          message: 'Τελική έγκριση από Manager 2',
-          newStatus: 'approved'
-        });
+        return res.json({ success: true, message: 'Τελική έγκριση από Manager 2', newStatus: 'approved' });
 
-      } 
-      else {
+      } else {
         await db.execute(`
           UPDATE vacation_requests 
           SET manager2_id = ?,
@@ -509,45 +470,27 @@ app.put('/api/vacation-requests/:id/status', async (req, res) => {
 
         if (process.env.SMTP_USER && request.user_email) {
           await emailService.sendRequestRejectedEmail(
-            request.user_email,
-            request.user_name,
-            request.start_date,
-            request.end_date,
-            `${managerName} (Επίπεδο 2)`
+            request.user_email, request.user_name, request.start_date, request.end_date, `${managerName} (Επίπεδο 2)`
           );
         }
 
-        return res.json({
-          success: true,
-          message: 'Απόρριψη από Manager 2',
-          newStatus: 'rejected'
-        });
+        return res.json({ success: true, message: 'Απόρριψη από Manager 2', newStatus: 'rejected' });
       }
     }
 
-    return res.status(400).json({
-      success: false,
-      error: 'Μη έγκυρο επίπεδο διαχειριστή'
-    });
+    return res.status(400).json({ success: false, error: 'Μη έγκυρο επίπεδο διαχειριστή' });
 
   } catch (error) {
     console.error('Update vacation request error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Αποτυχία ενημέρωσης αίτησης. Παρακαλώ δοκιμάστε ξανά.'
-    });
+    res.status(500).json({ success: false, error: 'Αποτυχία ενημέρωσης αίτησης. Παρακαλώ δοκιμάστε ξανά.' });
   }
 });
 
-app.get('/api/vacation-requests/pending/:managerId', async (req, res) => {
+app.get('/api/vacation-requests/pending/:managerId', authenticateToken, async (req, res) => {
   try {
     const { managerId } = req.params;
 
-    {/* Get manager info */}
-    const [manager] = await db.execute(
-      'SELECT manager_level FROM users WHERE id = ?',
-      [managerId]
-    );
+    const [manager] = await db.execute('SELECT manager_level FROM users WHERE id = ?', [managerId]);
 
     if (manager.length === 0) {
       return res.status(404).json({ success: false, error: 'Διαχειριστής δεν βρέθηκε' });
@@ -555,7 +498,6 @@ app.get('/api/vacation-requests/pending/:managerId', async (req, res) => {
 
     let managerLevel = manager[0].manager_level;
 
-    {/* Forcing manager ID 40 always level 2  */}
     if (parseInt(managerId) === 40) {
       managerLevel = 2;
     }
@@ -564,12 +506,11 @@ app.get('/api/vacation-requests/pending/:managerId', async (req, res) => {
     let params = [];
 
     if (managerLevel === 1) {
-      {/* Pending requests for managers level 1 */}
       query = `
         SELECT vr.*, 
-          u.name as user_name, 
-          d.name as department_name, 
-          d.color as department_color
+               u.name as user_name, 
+               d.name as department_name, 
+               d.color as department_color
         FROM vacation_requests vr
         JOIN users u ON vr.user_id = u.id
         JOIN departments d ON u.department_id = d.id
@@ -580,13 +521,12 @@ app.get('/api/vacation-requests/pending/:managerId', async (req, res) => {
       params = [managerId];
 
     } else if (managerLevel === 2) {
-      {/* Manager level 2 sees only approved from managers level 1 requests */}
       query = `
         SELECT vr.*, 
-          u.name as user_name, 
-          d.name as department_name, 
-          d.color as department_color,
-          m1.name as manager1_name
+               u.name as user_name, 
+               d.name as department_name, 
+               d.color as department_color,
+               m1.name as manager1_name
         FROM vacation_requests vr
         JOIN users u ON vr.user_id = u.id
         JOIN departments d ON u.department_id = d.id
@@ -597,7 +537,6 @@ app.get('/api/vacation-requests/pending/:managerId', async (req, res) => {
     }
 
     const [rows] = await db.execute(query, params);
-
     res.json(rows);
 
   } catch (error) {
@@ -606,40 +545,27 @@ app.get('/api/vacation-requests/pending/:managerId', async (req, res) => {
   }
 });
 
-app.post('/api/vacation-days/grant', async (req, res) => {
+app.post('/api/vacation-days/grant', authenticateToken, async (req, res) => {
   try {
     const { userIds, days, startDate, endDate, reason, grantedBy, isDeduction } = req.body;
     
     if (!userIds || !Array.isArray(userIds) || userIds.length === 0) {
-      return res.status(400).json({
-        success: false,
-        error: 'Λείπουν χρήστες'
-      });
+      return res.status(400).json({ success: false, error: 'Λείπουν χρήστες' });
     }
-    
     if (!days || days <= 0) {
-      return res.status(400).json({
-        success: false,
-        error: 'Μη έγκυρος αριθμός ημερών'
-      });
+      return res.status(400).json({ success: false, error: 'Μη έγκυρος αριθμός ημερών' });
     }
-    
     if (!reason || !reason.trim()) {
-      return res.status(400).json({
-        success: false,
-        error: 'Λείπει αιτιολογία'
-      });
+      return res.status(400).json({ success: false, error: 'Λείπει αιτιολογία' });
     }
     
     if (isDeduction) {
-      {/* mandatory time off form ManageDaysView */}
       const now = new Date().toISOString().split('T')[0];
-
       for (const userId of userIds) {
         await db.execute(
           `INSERT INTO vacation_requests 
-            (user_id, start_date, end_date, reason, leave_type, status, reviewed_by, reviewed_date, manager_granted, created_at) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           (user_id, start_date, end_date, reason, leave_type, status, reviewed_by, reviewed_date, manager_granted, created_at) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [userId, startDate, endDate, reason, 'mandatory', 'approved', grantedBy, now, 1, now]
         );
       }    
@@ -659,23 +585,18 @@ app.post('/api/vacation-days/grant', async (req, res) => {
 
 app.use((err, req, res, next) => {
   console.error('Unhandled error:', err);
-  res.status(500).json({
-    success: false,
-    error: 'Internal server error'
-  });
+  res.status(500).json({ success: false, error: 'Internal server error' });
 });
 
 app.use((req, res) => {
-  res.status(404).json({
-    success: false,
-    error: 'Endpoint not found'
-  });
+  res.status(404).json({ success: false, error: 'Endpoint not found' });
 });
 
 const PORT = process.env.PORT || 3001;
 
 initializeDatabase().then(() => {
   app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
   });
 }).catch(error => {
   console.error('Failed to start server:', error);
