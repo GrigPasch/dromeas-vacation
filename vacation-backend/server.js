@@ -545,7 +545,7 @@ app.get('/api/vacation-requests/pending/:managerId', authenticateToken, async (r
   }
 });
 
-app.post('/api/vacation-days/grant', authenticateToken, async (req, res) => {
+app.post('/api/grant', authenticateToken, async (req, res) => {
   try {
     const { userIds, days, startDate, endDate, reason, grantedBy, isDeduction } = req.body;
     

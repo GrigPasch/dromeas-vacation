@@ -11,7 +11,23 @@ const RequestsView = ({ currentUser, vacationRequests, userDatabase, departments
       return dateB - dateA;
     });
 
+  const getManagerName = (managerId) => {
+    if (!managerId) return 'Άγνωστος';
+    return userDatabase.find(u => u.id === managerId)?.name || 'Άγνωστος';
+  };
+
   const getStatusInfo = (request) => {
+    // Manager-granted mandatory leave — show purple with granter's name
+    if (request.manager_granted || request.managerGranted) {
+      const granterName = getManagerName(request.reviewed_by || request.reviewedBy);
+      return {
+        icon: <Shield className="h-4 w-4" />,
+        color: 'bg-purple-100 text-purple-800 border-purple-200',
+        label: `Χορηγήθηκε από ${granterName}`,
+        description: `Η άδεια χορηγήθηκε από τον/την ${granterName}`
+      };
+    }
+
     const status = request.status;
     switch (status) {
       case 'pending':
@@ -47,11 +63,6 @@ const RequestsView = ({ currentUser, vacationRequests, userDatabase, departments
 
   const getLeaveTypeInfo = (leaveType) => LEAVE_TYPES[leaveType] || LEAVE_TYPES.vacation;
 
-  const getManagerName = (managerId) => {
-    if (!managerId) return 'Άγνωστος';
-    return userDatabase.find(u => u.id === managerId)?.name || 'Άγνωστος';
-  };
-
   return (
     <div className="space-y-4">
       <div className="mb-6">
@@ -65,8 +76,9 @@ const RequestsView = ({ currentUser, vacationRequests, userDatabase, departments
         const endDate = new Date(request.end_date || request.endDate);
         const workingDays = calculateDaysBetween(request.start_date || request.startDate, request.end_date || request.endDate, holidays);
 
+        const isGranted = request.manager_granted || request.managerGranted;
         return (
-          <div key={request.id} className={`bg-white border-2 rounded-lg p-4 ${statusInfo.color.split(' ')[2]}`}>
+          <div key={request.id} className={`border-2 rounded-lg p-4 ${isGranted ? 'bg-purple-50 border-purple-200' : 'bg-white ' + statusInfo.color.split(' ')[2]}`}>
             <div className="flex items-start justify-between mb-3">
               <div className="flex items-center space-x-2">
                 <span className="text-2xl">{leaveTypeInfo.icon}</span>
@@ -99,19 +111,21 @@ const RequestsView = ({ currentUser, vacationRequests, userDatabase, departments
                 "{request.reason}"
               </p>
             )}
-            {/* Timeline */}
-            <div className="mt-3 pt-3 border-t border-gray-200/50 space-y-1">
-              <div className="flex items-center text-[11px] text-gray-500">
-                <div className={`w-2 h-2 rounded-full mr-2 ${request.manager1_status === 'manager1_approved' ? 'bg-green-500' : 'bg-yellow-500'}`} />
-                Δ1: {request.manager1_id ? getManagerName(request.manager1_id) : 'Εκκρεμεί'}
-              </div>
-              {request.manager1_status === 'manager1_approved' && (
+            {/* Timeline — hidden for manager-granted leaves */}
+            {!isGranted && (
+              <div className="mt-3 pt-3 border-t border-gray-200/50 space-y-1">
                 <div className="flex items-center text-[11px] text-gray-500">
-                  <div className={`w-2 h-2 rounded-full mr-2 ${request.status === 'approved' ? 'bg-green-500' : 'bg-blue-500'}`} />
-                  Δ2: {request.manager2_id ? getManagerName(request.manager2_id) : 'Αναμονή'}
+                  <div className={`w-2 h-2 rounded-full mr-2 ${request.manager1_status === 'manager1_approved' ? 'bg-green-500' : 'bg-yellow-500'}`} />
+                  Δ1: {request.manager1_id ? getManagerName(request.manager1_id) : 'Εκκρεμεί'}
                 </div>
-              )}
-            </div>
+                {request.manager1_status === 'manager1_approved' && (
+                  <div className="flex items-center text-[11px] text-gray-500">
+                    <div className={`w-2 h-2 rounded-full mr-2 ${request.status === 'approved' ? 'bg-green-500' : 'bg-blue-500'}`} />
+                    Δ2: {request.manager2_id ? getManagerName(request.manager2_id) : 'Αναμονή'}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         );
       })}

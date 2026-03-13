@@ -91,30 +91,49 @@ const RequestModal = ({
     return { hasOverlap: false };
   };
 
+  const getBalanceForYear = (year) => {
+    if (!annualBalances || annualBalances.length === 0) return 0;
+    const pivotedEntry = annualBalances.find(b => Number(b.userId || b.user_id) === Number(currentUser.id));
+    const yearKey = `balance_${year}`;
+    if (pivotedEntry && pivotedEntry[yearKey] !== undefined) return Number(pivotedEntry[yearKey]);
+    const rawEntry = annualBalances.find(b => Number(b.cycle_start_year || b.year) === year);
+    if (rawEntry && rawEntry.total_allowed !== undefined) return Number(rawEntry.total_allowed);
+    return 0;
+  };
+
+  // Computes how days are split between current and next cycle
+  const getSplitBalance = () => {
+    if (leaveType !== 'vacation' || !startDate) return null;
+    const currentAllowed = getBalanceForYear(selectedLeaveYear);
+    const currentUsed = getUsedDaysByLeaveYear(currentUser.id, existingRequests, selectedLeaveYear, holidays);
+    const currentRemaining = Math.max(0, currentAllowed - currentUsed);
+
+    const nextYear = selectedLeaveYear + 1;
+    const nextAllowed = getBalanceForYear(nextYear);
+    const nextUsed = getUsedDaysByLeaveYear(currentUser.id, existingRequests, nextYear, holidays);
+    const nextRemaining = Math.max(0, nextAllowed - nextUsed);
+
+    return { currentRemaining, nextRemaining, nextYear };
+  };
+
   const calculateRemainingDays = (type) => {
     if (!currentUser) return 0;
     
     switch (type) {
-      case 'vacation': 
-        let totalAllowed = 0;
-
-        if (annualBalances && annualBalances.length > 0) {
-          const pivotedEntry = annualBalances.find(b => Number(b.userId || b.user_id) === Number(currentUser.id));
-          const yearKey = `balance_${selectedLeaveYear}`;
-          
-          if (pivotedEntry && pivotedEntry[yearKey] !== undefined) {
-            totalAllowed = Number(pivotedEntry[yearKey]);
-          } else {
-            const rawEntry = annualBalances.find(b => Number(b.cycle_start_year || b.year) === selectedLeaveYear);
-            if (rawEntry && rawEntry.total_allowed !== undefined) {
-              totalAllowed = Number(rawEntry.total_allowed);
-            }
-          }
-        }
-        
+      case 'vacation': {
+        const totalAllowed = getBalanceForYear(selectedLeaveYear);
         const usedInCycle = getUsedDaysByLeaveYear(currentUser.id, existingRequests, selectedLeaveYear, holidays);
-        return Math.max(0, totalAllowed - usedInCycle);
-        
+        const remaining = totalAllowed - usedInCycle;
+
+        // If current cycle exhausted, fall back to next cycle
+        if (remaining <= 0) {
+          const nextYear = selectedLeaveYear + 1;
+          const nextAllowed = getBalanceForYear(nextYear);
+          const nextUsed = getUsedDaysByLeaveYear(currentUser.id, existingRequests, nextYear, holidays);
+          return Math.max(0, nextAllowed - nextUsed);
+        }
+        return remaining;
+      }
       case 'unjustified': return '∞';
       case 'maternity': return currentUser.maternity_days_total || currentUser.maternityDaysTotal || 119;
       case 'paternity': return currentUser.paternity_days_total || currentUser.paternityDaysTotal || 14;
@@ -159,13 +178,20 @@ const RequestModal = ({
     const availableDays = calculateRemainingDays(leaveType);
 
     if (leaveType === 'vacation' && typeof availableDays === 'number' && totalDaysRequested > availableDays) {
-      alert(`Δεν έχετε αρκετές ημέρες υπολοίπου για το έτος άδειας ${selectedLeaveYear}. (Διαθέσιμες: ${availableDays})`);
-      return;
+      const nextYear = selectedLeaveYear + 1;
+      const nextAllowed = getBalanceForYear(nextYear);
+      const nextUsed = getUsedDaysByLeaveYear(currentUser.id, existingRequests, nextYear, holidays);
+      const nextRemaining = Math.max(0, nextAllowed - nextUsed);
+      if (totalDaysRequested > nextRemaining) {
+        alert(`Δεν έχετε αρκετές ημέρες υπολοίπου. (Διαθέσιμες: ${availableDays > 0 ? availableDays : nextRemaining})`);
+        return;
+      }
     }
 
+    const toLocalISO = (d) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
     onSubmit({
-      startDate: start.toISOString().split('T')[0],
-      endDate: end.toISOString().split('T')[0],
+      startDate: toLocalISO(start),
+      endDate: toLocalISO(end),
       reason,
       leaveType,
       leaveYear: selectedLeaveYear
@@ -280,18 +306,55 @@ const RequestModal = ({
             />
           </div>
           {/* Balance Display */}
-          <div className="bg-blue-50 border border-blue-100 rounded-lg p-3">
-            <div className="flex items-center space-x-2 mb-1">
-              <Info className="h-3 w-3 text-blue-500" />
-              <span className="text-[11px] text-blue-700 font-bold uppercase">
-                Υπόλοιπο έτους {selectedLeaveYear}
-              </span>
+          {leaveType === 'vacation' && (() => {
+            const split = getSplitBalance();
+            if (!split) return null;
+            const { currentRemaining, nextRemaining, nextYear } = split;
+            const requested = startDate && endDate ? calculateDaysBetween(new Date(startDate), new Date(endDate), holidays) : 0;
+            const needsNextYear = currentRemaining <= 0 || requested > currentRemaining;
+            const fromCurrent = Math.min(requested, currentRemaining);
+            const fromNext = Math.max(0, requested - currentRemaining);
+
+            return (
+              <div className={`border rounded-lg p-3 ${needsNextYear && requested > 0 ? 'bg-orange-50 border-orange-200' : 'bg-blue-50 border-blue-100'}`}>
+                <div className="flex items-center space-x-2 mb-2">
+                  <Info className={`h-3 w-3 ${needsNextYear && requested > 0 ? 'text-orange-500' : 'text-blue-500'}`} />
+                  <span className={`text-[11px] font-bold uppercase ${needsNextYear && requested > 0 ? 'text-orange-700' : 'text-blue-700'}`}>
+                    Υπόλοιπο Αδειών
+                  </span>
+                </div>
+                <div className="flex justify-between text-sm mb-1">
+                  <span className="text-gray-600">Διαθέσιμες {selectedLeaveYear}:</span>
+                  <span className="font-bold text-blue-700">{currentRemaining} ημέρες</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600">Διαθέσιμες {nextYear}:</span>
+                  <span className="font-bold text-purple-700">{nextRemaining} ημέρες</span>
+                </div>
+                {needsNextYear && requested > 0 && fromNext > 0 && (
+                  <div className="mt-2 pt-2 border-t border-orange-200 text-xs text-orange-700 font-medium">
+                    ⚠️ Δεν έχετε αρκετές ημέρες για το {selectedLeaveYear}. Θα χρησιμοποιηθούν:
+                    <div className="mt-1 space-y-0.5">
+                      {fromCurrent > 0 && <div>• <strong>{fromCurrent} ημέρες</strong> από το υπόλοιπο {selectedLeaveYear}</div>}
+                      <div>• <strong>{fromNext} ημέρες</strong> από το υπόλοιπο {nextYear}</div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+          {leaveType !== 'vacation' && (
+            <div className="bg-blue-50 border border-blue-100 rounded-lg p-3">
+              <div className="flex items-center space-x-2 mb-1">
+                <Info className="h-3 w-3 text-blue-500" />
+                <span className="text-[11px] text-blue-700 font-bold uppercase">Διαθέσιμες ημέρες</span>
+              </div>
+              <div className="flex justify-between text-sm mt-1">
+                <span className="text-gray-600 font-medium">Υπόλοιπο:</span>
+                <span className="font-bold text-blue-700">{calculateRemainingDays(leaveType)} ημέρες</span>
+              </div>
             </div>
-            <div className="flex justify-between text-sm mt-1">
-              <span className="text-gray-600 font-medium">Διαθέσιμες ημέρες:</span>
-              <span className="font-bold text-blue-700">{calculateRemainingDays(leaveType)} ημέρες</span>
-            </div>
-          </div>
+          )}
         </div>
         <div className="flex space-x-3 mt-6">
           <button

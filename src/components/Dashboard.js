@@ -11,7 +11,19 @@ import { getUsedDaysByLeaveYear } from '../utils/vacationUtils';
 import GrantedDaysHistory from './GrantedDaysHistory';
 import YearlyBalanceView from './YearlyBalanceView'; 
 
-const API_BASE_URL = 'http://localhost:3001/api';
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3002/api';
+
+const authFetch = (url, options = {}) => {
+  const token = localStorage.getItem('auth_token');
+  return fetch(url, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(options.headers || {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+};
 
 const Dashboard = ({ 
   currentUser, 
@@ -100,11 +112,8 @@ const Dashboard = ({
 
   const handleGrantDays = async (grantData) => {
     try {
-      const response = await fetch(`${API_BASE_URL}/vacation-days/grant`, {
+      const response = await authFetch(`${API_BASE_URL}/grant`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
         body: JSON.stringify({
           userIds: grantData.userIds,
           days: grantData.days,

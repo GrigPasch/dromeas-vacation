@@ -133,14 +133,25 @@ export const getUsedDaysByType = (userId, vacationRequests, holidays = []) => {
  */
 export const getRemainingDaysByType = (user, vacationRequests, annualBalances = [], holidays = []) => {
   const currentLeaveYear = getLeaveYear(new Date());
+  const nextLeaveYear = currentLeaveYear + 1;
   const userId = Number(user.id || user.userId);
   const usedDaysInYear = getUsedDaysByLeaveYear(userId, vacationRequests, currentLeaveYear, holidays);
   const yearlyAllowed = getYearlyBalance(userId, annualBalances, currentLeaveYear);
-  
+  const currentRemaining = yearlyAllowed - usedDaysInYear;
+
+  let vacationRemaining;
+  if (currentRemaining <= 0) {
+    const nextYearAllowed = getYearlyBalance(userId, annualBalances, nextLeaveYear);
+    const usedDaysInNextYear = getUsedDaysByLeaveYear(userId, vacationRequests, nextLeaveYear, holidays);
+    vacationRemaining = nextYearAllowed - usedDaysInNextYear;
+  } else {
+    vacationRemaining = currentRemaining;
+  }
+
   const usedByType = getUsedDaysByType(userId, vacationRequests, holidays);
 
   return {
-    vacation: yearlyAllowed - usedDaysInYear,
+    vacation: vacationRemaining,
     unjustified: Infinity,
     maternity: (user.maternityDaysTotal || user.maternity_days_total || 119) - (usedByType.maternity || 0),
     paternity: (user.paternityDaysTotal || user.paternity_days_total || 14) - (usedByType.paternity || 0),
@@ -173,7 +184,14 @@ export const hasEnoughVacationDays = (userId, startDate, endDate, leaveType, use
   if (leaveType === 'vacation') {
     const yearlyAllowed = getYearlyBalance(userId, annualBalances, leaveYear);
     const usedInYear = getUsedDaysByLeaveYear(userId, vacationRequests, leaveYear, holidays);
-    return (yearlyAllowed - usedInYear) >= requestedDays;
+    const currentRemaining = yearlyAllowed - usedInYear;
+
+    if (currentRemaining >= requestedDays) return true;
+
+    const nextLeaveYear = leaveYear + 1;
+    const nextYearAllowed = getYearlyBalance(userId, annualBalances, nextLeaveYear);
+    const usedInNextYear = getUsedDaysByLeaveYear(userId, vacationRequests, nextLeaveYear, holidays);
+    return (nextYearAllowed - usedInNextYear) >= requestedDays;
   }
   
   let totalAvailable = 0;

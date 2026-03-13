@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import LoginScreen from './components/LoginScreen';
 import Dashboard from './components/Dashboard';
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3002/api';
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001/api';
 
 const getToken = () => localStorage.getItem('auth_token');
 const setToken = (token) => localStorage.setItem('auth_token', token);

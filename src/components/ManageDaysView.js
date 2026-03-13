@@ -24,7 +24,8 @@ const ManageDaysView = ({ currentUser, userDatabase, departments, onGrantDays, v
 
   const dateToISOString = (date) => {
     if (!date) return '';
-    return date.toISOString().split('T')[0];
+    // Use local date to avoid UTC timezone shift
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
   };
 
   const formatDate = (date) => {
@@ -50,7 +51,8 @@ const ManageDaysView = ({ currentUser, userDatabase, departments, onGrantDays, v
   };
 
   const isPublicHoliday = (date) => {
-    const dateStr = date.toISOString().split('T')[0];
+    // Use local date formatting to avoid UTC timezone shift (UTC+2 shifts date back 1 day)
+    const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
     return publicHolidays.includes(dateStr);
   };
 
