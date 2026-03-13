@@ -14,10 +14,6 @@ export const getLeaveYear = (dateString) => {
   return month < 3 ? year - 1 : year;
 };
 
-/**
- * Βρίσκει το εγκεκριμένο υπόλοιπο (total_allowed) από τον πίνακα annualBalances 
- * για συγκεκριμένο χρήστη και έτος κύκλου.
- */
 export const getYearlyBalance = (userId, annualBalances, leaveYear) => {
   if (!annualBalances || !Array.isArray(annualBalances)) return 0;
   const balance = annualBalances.find(b => 
@@ -28,9 +24,16 @@ export const getYearlyBalance = (userId, annualBalances, leaveYear) => {
 };
 
 export const calculateDaysBetween = (startDate, endDate, holidays = []) => {
-  const start = new Date(startDate);
-  const end = new Date(endDate);
-  if (isNaN(start) || isNaN(end)) return 0; // Guard for invalid dates
+  const parseLocal = (dateStr) => {
+    if (!dateStr) return null;
+    const str = typeof dateStr === 'string' ? dateStr : dateStr.toISOString().split('T')[0];
+    const [year, month, day] = str.split('T')[0].split('-').map(Number);
+    return new Date(year, month - 1, day);
+  };
+
+  const start = parseLocal(startDate);
+  const end = parseLocal(endDate);
+  if (!start || !end || isNaN(start) || isNaN(end)) return 0;
 
   let count = 0;
   let currentDate = new Date(start);
@@ -60,9 +63,6 @@ export const calculateDaysBetween = (startDate, endDate, holidays = []) => {
   return count;
 };
 
-/**
- * Υπολογίζει τις χρησιμοποιημένες ημέρες ενός χρήστη για ένα συγκεκριμένο ΕΤΟΣ ΑΔΕΙΑΣ (Απρ-Μαρ)
- */
 export const getUsedDaysByLeaveYear = (userId, requests, leaveYear, holidays) => {
   if (!requests) return 0;
   return requests
@@ -128,9 +128,28 @@ export const getUsedDaysByType = (userId, vacationRequests, holidays = []) => {
   };
 };
 
-/**
- * Υπολογίζει το υπόλοιπο βασισμένο στο annualBalances (total_allowed) του τρέχοντος έτους κύκλου
- */
+export const getUsedDaysByTypeForYears = (userId, vacationRequests, years = [], holidays = []) => {
+  if (!vacationRequests || years.length === 0) {
+    return { vacation: 0, unjustified: 0, maternity: 0, paternity: 0, unpaid: 0, mandatory: 0 };
+  }
+  const filtered = vacationRequests.filter(req => {
+    const startDate = req.start_date || req.startDate;
+    if (!startDate) return false;
+    const d = new Date(startDate);
+    const cycleYear = d.getMonth() < 3 ? d.getFullYear() - 1 : d.getFullYear();
+    return years.includes(cycleYear);
+  });
+  return {
+    vacation: getUsedDays(userId, filtered, 'vacation', holidays),
+    unjustified: getUsedDays(userId, filtered, 'unjustified', holidays),
+    maternity: getUsedDays(userId, filtered, 'maternity', holidays),
+    paternity: getUsedDays(userId, filtered, 'paternity', holidays),
+    unpaid: getUsedDays(userId, filtered, 'unpaid', holidays),
+    mandatory: getUsedDays(userId, filtered, 'mandatory', holidays),
+  };
+};
+
+
 export const getRemainingDaysByType = (user, vacationRequests, annualBalances = [], holidays = []) => {
   const currentLeaveYear = getLeaveYear(new Date());
   const nextLeaveYear = currentLeaveYear + 1;

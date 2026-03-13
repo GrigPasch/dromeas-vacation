@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { History, AlertCircle, CheckCircle, Calendar, X } from 'lucide-react';
+import { History, AlertCircle, CheckCircle, Calendar, X, Search } from 'lucide-react';
 import { getUsedDays, isGreekHoliday } from '../utils/vacationUtils';
 import DepartmentFilter from './DepartmentFilter';
 import DatePicker, { registerLocale } from 'react-datepicker';
@@ -12,9 +12,9 @@ const GrantedDaysHistoryView = ({ currentUser, userDatabase, vacationRequests, d
   const [selectedDepartments, setSelectedDepartments] = useState(
     departments.map(dept => dept.id)
   );
-
   const [startDateFilter, setStartDateFilter] = useState(null);
   const [endDateFilter, setEndDateFilter] = useState(null);
+  const [searchTerm, setSearchTerm] = useState('');
 
   const getDayBreakdown = (start, end) => {
     let workdays = 0;
@@ -89,6 +89,7 @@ const GrantedDaysHistoryView = ({ currentUser, userDatabase, vacationRequests, d
   const filteredLeaves = useMemo(() => {
     return allGrantedLeaves.filter(grant => {
       const matchesDept = selectedDepartments.includes(grant.deptId);
+      const matchesSearch = !searchTerm || (grant.user?.name || '').toLowerCase().includes(searchTerm.toLowerCase());
       let matchesDate = true;
       if (startDateFilter && endDateFilter) {
         matchesDate = grant.grantedDate >= startDateFilter && grant.grantedDate <= endDateFilter;
@@ -97,9 +98,9 @@ const GrantedDaysHistoryView = ({ currentUser, userDatabase, vacationRequests, d
       } else if (endDateFilter) {
         matchesDate = grant.grantedDate <= endDateFilter;
       }
-      return matchesDept && matchesDate;
+      return matchesDept && matchesSearch && matchesDate;
     });
-  }, [allGrantedLeaves, selectedDepartments, startDateFilter, endDateFilter]);
+  }, [allGrantedLeaves, selectedDepartments, startDateFilter, endDateFilter, searchTerm]);
 
   const stats = useMemo(() => ({
     totalGrants: filteredLeaves.length,
@@ -119,6 +120,7 @@ const GrantedDaysHistoryView = ({ currentUser, userDatabase, vacationRequests, d
         </div>
         <History className="h-6 w-6 text-blue-600" />
       </div>
+
       {/* Stats Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div className="bg-white p-3 rounded-lg border border-gray-100 shadow-sm">
@@ -138,10 +140,28 @@ const GrantedDaysHistoryView = ({ currentUser, userDatabase, vacationRequests, d
           <p className="text-xl font-bold text-red-600">{stats.totalExcessDays}</p>
         </div>
       </div>
+
       {/* Filters */}
-      <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm space-y-4 relative z-40">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="w-full md:w-72">
+      <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm space-y-4">
+        <div className="flex flex-wrap items-start gap-4">
+
+          {/* Name Search */}
+          <div className="w-full md:w-56">
+            <p className="text-[10px] font-bold text-gray-400 uppercase mb-2 tracking-wider">Αναζήτηση Υπαλλήλου</p>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <input
+                type="text"
+                placeholder="Όνομα υπαλλήλου..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-9 pr-4 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 w-full"
+              />
+            </div>
+          </div>
+
+          {/* Department Filter — overflow visible so dropdown isn't clipped */}
+          <div className="w-full md:w-72" style={{ position: 'relative', zIndex: 50 }}>
             <p className="text-[10px] font-bold text-gray-400 uppercase mb-2 tracking-wider">Φίλτρο Τμήματος</p>
             <DepartmentFilter
               departments={departments}
@@ -151,6 +171,7 @@ const GrantedDaysHistoryView = ({ currentUser, userDatabase, vacationRequests, d
             />
           </div>
 
+          {/* Date Range */}
           <div className="w-full md:w-auto">
             <p className="text-[10px] font-bold text-gray-400 uppercase mb-2">Εύρος Ημερομηνίας Χορήγησης</p>
             <div className="flex items-center gap-2">
@@ -161,6 +182,7 @@ const GrantedDaysHistoryView = ({ currentUser, userDatabase, vacationRequests, d
                 className="text-sm border border-gray-300 rounded-lg p-2 w-32 outline-none focus:ring-2 focus:ring-blue-500"
                 locale="el"
                 dateFormat="dd/MM/yyyy"
+                popperPlacement="bottom-start"
               />
               <span className="text-gray-400">—</span>
               <DatePicker
@@ -170,6 +192,7 @@ const GrantedDaysHistoryView = ({ currentUser, userDatabase, vacationRequests, d
                 className="text-sm border border-gray-300 rounded-lg p-2 w-32 outline-none focus:ring-2 focus:ring-blue-500"
                 locale="el"
                 dateFormat="dd/MM/yyyy"
+                popperPlacement="bottom-start"
               />
               {(startDateFilter || endDateFilter) && (
                 <button 
@@ -181,10 +204,12 @@ const GrantedDaysHistoryView = ({ currentUser, userDatabase, vacationRequests, d
               )}
             </div>
           </div>
+
         </div>
       </div>
+
       {/* List */}
-      <div className="space-y-3 relative z-10">
+      <div className="space-y-3">
         {filteredLeaves.map(grant => {
           const dept = departments.find(d => d.id === grant.deptId);
           return (
@@ -212,10 +237,9 @@ const GrantedDaysHistoryView = ({ currentUser, userDatabase, vacationRequests, d
                       </p>
                     </div>
                     <div className="space-y-3">
-                      {/* Ημερολογιακή Σειρά */}
                       <div>
                         <span className="text-[11px] text-gray-500 font-bold uppercase block mb-1 xs:text-[10px]">
-                          Ημερολογιακές ({grant.breakdown.calendarDays} μέρες):
+                          {'Ημερολογιακές (' + grant.breakdown.calendarDays + ' μέρες):'}
                         </span>
                         <div className="flex flex-wrap gap-1 xs:text-[10px]">
                           {grant.breakdown.allDaysFormatted.map((day, idx) => (
@@ -230,13 +254,11 @@ const GrantedDaysHistoryView = ({ currentUser, userDatabase, vacationRequests, d
                           ))}
                         </div>
                       </div>
-                      {/* Εργάσιμες (Μόνο για χρέωση) */}
                       <div className="pt-2 border-t border-gray-200">
                         <span className="text-[11px] text-blue-600 font-bold uppercase block mb-1">
                           {grant.daysGranted === 1 
-                          ? `Εργάσιμη : ${grant.daysGranted} μέρα:` 
-                          : `Εργάσιμες : ${grant.daysGranted} μέρες:`
-                          }
+                            ? 'Εργάσιμη : ' + grant.daysGranted + ' μέρα:'
+                            : 'Εργάσιμες : ' + grant.daysGranted + ' μέρες:'}
                         </span>
                         <div className="text-sm font-bold text-blue-700 italic">
                           {grant.breakdown.allDaysFormatted
@@ -245,10 +267,9 @@ const GrantedDaysHistoryView = ({ currentUser, userDatabase, vacationRequests, d
                             .join(' - ')}
                         </div>
                       </div>
-
                       {grant.breakdown.foundHolidays.length > 0 && (
                         <div className="text-[10px] text-orange-600 font-bold uppercase bg-orange-50 px-2 py-0.5 rounded inline-block">
-                          Αργία: {grant.breakdown.foundHolidays.join(', ')}
+                          {'Αργία: ' + grant.breakdown.foundHolidays.join(', ')}
                         </div>
                       )}
                     </div>
@@ -263,7 +284,7 @@ const GrantedDaysHistoryView = ({ currentUser, userDatabase, vacationRequests, d
                   {grant.exceededLimit ? (
                     <div className="bg-orange-50 text-orange-700 p-2 rounded-lg border border-orange-100 flex items-center space-x-1 xs:text-right">
                       <AlertCircle className="h-3 w-3" />
-                      <span className="text-[9px] font-bold uppercase">Υπέρβαση +{grant.excessDays}</span>
+                      <span className="text-[9px] font-bold uppercase">{'Υπέρβαση +' + grant.excessDays}</span>
                     </div>
                   ) : (
                     <div className="bg-green-50 text-green-700 px-3 py-1 rounded-full border border-green-100 flex items-center space-x-1 xs:text-right">
@@ -276,6 +297,13 @@ const GrantedDaysHistoryView = ({ currentUser, userDatabase, vacationRequests, d
             </div>
           );
         })}
+
+        {filteredLeaves.length === 0 && (
+          <div className="text-center py-12 text-gray-400">
+            <History className="h-12 w-12 mx-auto mb-3 opacity-30" />
+            <p className="text-sm">Δεν βρέθηκαν χορηγήσεις για τα επιλεγμένα φίλτρα.</p>
+          </div>
+        )}
       </div>
     </div>
   );

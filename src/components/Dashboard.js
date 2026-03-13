@@ -287,6 +287,7 @@ const Dashboard = ({
             userDatabase={userDatabase} 
             departments={departments}
             holidays={holidays}
+            vacationRequests={vacationRequests}
           />
         ) : null;
       case 'approvals':
